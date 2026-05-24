@@ -8,8 +8,8 @@ class Member:
     def __init__(self, id, name, sponsor_id, parent_id=None, is_active=False):
         self.id = id
         self.name = name
-        self.sponsor_id = sponsor_id          # untuk Auto Rich (referral)
-        self.parent_id = parent_id            # untuk Auto Cuan (placement)
+        self.sponsor_id = sponsor_id
+        self.parent_id = parent_id
         self.left_child_id = None
         self.right_child_id = None
         self.is_active = is_active
@@ -29,8 +29,8 @@ def init_session():
         st.session_state.total_bonus_rich = 0
         st.session_state.total_sponsor_bonus = 0
         st.session_state.transactions = []
-        # Untuk round-robin, simpan node terakhir yang diisi
-        st.session_state.last_placed_node = 1
+        # Antrian global untuk spillover round-robin (node yang masih punya slot kosong)
+        st.session_state.placement_queue = deque([1])
         st.session_state.selected_sponsor_id = 1
         st.session_state.reg_name = ""
         # Konfigurasi komisi default
@@ -43,45 +43,39 @@ def init_session():
 
 def find_placement_cuan():
     """
-    Mencari posisi kosong dengan BFS level-order, prioritas kanan.
-    Menggunakan round-robin berdasarkan node terakhir yang diisi.
+    Menggunakan antrian global yang berisi node yang masih memiliki slot kosong.
+    Ambil node dari depan, prioritaskan slot kanan.
+    Setelah diisi, jika node masih punya slot (kiri masih kosong), kembalikan ke antrian.
+    Node baru akan ditambahkan ke antrian saat registrasi.
     """
     members = st.session_state.members
-    # Kumpulkan semua node yang memiliki setidaknya satu slot kosong, dengan urutan BFS (prioritas kanan)
-    nodes_with_slots = []
-    queue = deque([1])
-    while queue:
-        node_id = queue.popleft()
-        node = members[node_id]
-        # Prioritaskan node yang masih punya slot
-        if node.right_child_id is None or node.left_child_id is None:
-            nodes_with_slots.append(node_id)
-        # Masukkan anak ke queue dengan prioritas kanan dulu
-        if node.right_child_id:
-            queue.append(node.right_child_id)
-        if node.left_child_id:
-            queue.append(node.left_child_id)
-    
-    if not nodes_with_slots:
-        return None, None
-    
-    # Round-robin: cari node setelah last_placed_node
-    last = st.session_state.last_placed_node
-    try:
-        idx = nodes_with_slots.index(last)
-        next_idx = (idx + 1) % len(nodes_with_slots)
-    except ValueError:
-        next_idx = 0
-    
-    target_node_id = nodes_with_slots[next_idx]
-    st.session_state.last_placed_node = target_node_id
-    
-    node = members[target_node_id]
-    # Prioritas kanan
+    queue = st.session_state.placement_queue
+
+    # Pastikan antrian tidak kosong
+    if not queue:
+        # Jika kosong, isi ulang dengan semua node yang masih punya slot
+        for node in members.values():
+            if node.right_child_id is None or node.left_child_id is None:
+                queue.append(node.id)
+
+    node_id = queue.popleft()
+    node = members[node_id]
+
+    # Prioritaskan kanan
     if node.right_child_id is None:
-        return target_node_id, False  # False = kanan
+        is_left = False
+        # Jika setelah diisi kanan, kiri masih kosong, node masih punya slot
+        if node.left_child_id is None:
+            queue.append(node_id)
+        return node_id, is_left
+    elif node.left_child_id is None:
+        is_left = True
+        # Setelah mengisi kiri, node menjadi penuh (karena kanan sudah terisi)
+        # Tidak dikembalikan ke antrian
+        return node_id, is_left
     else:
-        return target_node_id, True   # True = kiri
+        # Seharusnya tidak sampai ke sini karena node penuh tidak ada di antrian
+        return find_placement_cuan()
 
 def register_member(sponsor_id, name):
     members = st.session_state.members
@@ -90,6 +84,7 @@ def register_member(sponsor_id, name):
     for m in members.values():
         if m.name.lower() == name.lower():
             return None, f"Nama '{name}' sudah terdaftar."
+
     new_id = st.session_state.next_id
     st.session_state.next_id += 1
 
@@ -100,18 +95,22 @@ def register_member(sponsor_id, name):
     # Member baru langsung aktif
     new_member = Member(new_id, name, sponsor_id, parent_id, is_active=True)
     members[new_id] = new_member
+
     parent = members[parent_id]
     if not is_left:
         parent.right_child_id = new_id
     else:
         parent.left_child_id = new_id
 
+    # Node baru memiliki dua slot kosong, tambahkan ke antrian
+    st.session_state.placement_queue.append(new_id)
+
     posisi = "kanan" if not is_left else "kiri"
     info = (f"✅ Auto Cuan: anak {posisi} dari {parent.name} (ID:{parent.id})\n"
             f"✅ Auto Rich: sponsor langsung = {members[sponsor_id].name} (ID:{sponsor_id})")
     return new_member, info
 
-# ---------------------------- Fungsi komisi (sama seperti sebelumnya) ----------------------------
+# ---------------------------- Fungsi komisi ----------------------------
 def get_ancestors_cuan(member_id, members, max_level):
     ancestors = []
     cur = members[member_id].parent_id
