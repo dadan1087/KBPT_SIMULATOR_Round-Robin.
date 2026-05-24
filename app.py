@@ -12,7 +12,7 @@ class Member:
         self.parent_id = parent_id            # untuk Auto Cuan (placement)
         self.left_child_id = None
         self.right_child_id = None
-        self.is_active = is_active            # status Auto Cuan bulan ini
+        self.is_active = is_active
         self.balance_cuan = 0
         self.balance_rich = 0
         self.total_spent = 0
@@ -29,12 +29,11 @@ def init_session():
         st.session_state.total_bonus_rich = 0
         st.session_state.total_sponsor_bonus = 0
         st.session_state.transactions = []
-        st.session_state.last_placement_node = 1   # node terakhir yang diisi untuk round-robin
         st.session_state.selected_sponsor_id = 1
         st.session_state.reg_name = ""
-        # Konfigurasi default komisi (dapat diubah)
-        st.session_state.cuan_percent = [0, 0.01, 0.01, 0.05, 0.03, 0.03, 0.02, 0.03, 0.07]  # level 1..8
-        st.session_state.rich_percent = [0, 0.05, 0.05, 0.04, 0.04, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01]  # level 1..10
+        # Konfigurasi komisi default
+        st.session_state.cuan_percent = [0, 0.01, 0.01, 0.05, 0.03, 0.03, 0.02, 0.03, 0.07]
+        st.session_state.rich_percent = [0, 0.05, 0.05, 0.04, 0.04, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01]
         st.session_state.cuan_max_level = 8
         st.session_state.rich_max_level = 10
         st.session_state.sponsor_bonus_percent = 0.20
@@ -42,46 +41,23 @@ def init_session():
 
 def find_placement_cuan():
     """
-    Algoritma spillover round-robin dimulai dari kanan.
-    Menghasilkan (parent_id, is_left) dengan is_left = True untuk kiri, False untuk kanan.
-    Menggunakan BFS dari root dengan prioritas kanan, dan memilih node berikutnya secara bergantian.
+    BFS level-order dengan prioritas kanan.
+    Kembalikan (parent_id, is_left) di mana is_left=False untuk kanan, True untuk kiri.
     """
     members = st.session_state.members
-    last_node = st.session_state.last_placement_node
-
-    # Kumpulkan semua node yang masih memiliki slot kosong (kiri atau kanan)
-    # Lakukan BFS dengan urutan: kanan dulu, lalu kiri
-    nodes_with_slots = []
     queue = deque([1])
     while queue:
         node_id = queue.popleft()
         node = members[node_id]
-        if node.right_child_id is None or node.left_child_id is None:
-            nodes_with_slots.append(node_id)
-        # Masukkan anak ke queue dengan prioritas kanan
-        if node.right_child_id:
-            queue.append(node.right_child_id)
-        if node.left_child_id:
-            queue.append(node.left_child_id)
-
-    if not nodes_with_slots:
-        return None, None
-
-    # Cari posisi last_node dalam daftar (round-robin)
-    try:
-        idx = nodes_with_slots.index(last_node)
-    except ValueError:
-        idx = -1  # jika tidak ditemukan, mulai dari awal
-    next_idx = (idx + 1) % len(nodes_with_slots)
-    target_node_id = nodes_with_slots[next_idx]
-    st.session_state.last_placement_node = target_node_id
-
-    node = members[target_node_id]
-    # Prioritas kanan: jika kanan kosong, isi kanan; jika tidak, isi kiri
-    if node.right_child_id is None:
-        return target_node_id, False   # False = kanan
-    else:
-        return target_node_id, True    # True = kiri
+        # Prioritaskan slot kanan
+        if node.right_child_id is None:
+            return node_id, False   # False = kanan
+        if node.left_child_id is None:
+            return node_id, True    # True = kiri
+        # Jika kedua anak penuh, masukkan ke queue dengan urutan kanan dulu
+        queue.append(node.right_child_id)
+        queue.append(node.left_child_id)
+    return None, None
 
 def register_member(sponsor_id, name):
     members = st.session_state.members
@@ -477,7 +453,6 @@ def main():
         new_name = st.text_input("Nama Lengkap", value=st.session_state.reg_name)
         st.session_state.reg_name = new_name
         sponsor_list = [(m.id, f"{m.name} (ID:{m.id})") for m in st.session_state.members.values()]
-        # Default selected sponsor = 1 (Perusahaan)
         current_index = 0
         for i, (sid, _) in enumerate(sponsor_list):
             if sid == st.session_state.selected_sponsor_id:
@@ -494,7 +469,7 @@ def main():
                     st.success(f"🎉 Member {new_member.name} (ID:{new_member.id}) berhasil!")
                     st.info(info)
                     st.session_state.reg_name = ""
-                    st.session_state.selected_sponsor_id = 1  # reset ke Perusahaan
+                    st.session_state.selected_sponsor_id = 1
                     st.rerun()
                 else:
                     st.error(info)
