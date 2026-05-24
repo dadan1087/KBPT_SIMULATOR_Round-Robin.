@@ -5,7 +5,7 @@ from datetime import datetime
 
 # ---------------------------- Data Model ----------------------------
 class Member:
-    def __init__(self, id, name, sponsor_id, parent_id=None, is_active=False):
+    def __init__(self, id, name, sponsor_id, parent_id=None, is_active=True):
         self.id = id
         self.name = name
         self.sponsor_id = sponsor_id          # untuk Auto Rich (referral)
@@ -73,7 +73,8 @@ def register_member(sponsor_id, name):
     if parent_id is None:
         return None, "Tidak ada slot kosong di binary tree."
 
-    new_member = Member(new_id, name, sponsor_id, parent_id, is_active=False)
+    # Member baru langsung aktif
+    new_member = Member(new_id, name, sponsor_id, parent_id, is_active=True)
     members[new_id] = new_member
     parent = members[parent_id]
     if not is_left:
@@ -109,7 +110,7 @@ def get_ancestors_rich(member_id, members, max_level):
 def process_transaction_cuan(member_id, amount, apply_to_balance=False):
     members = st.session_state.members
     member = members[member_id]
-    member.is_active = (amount >= 100000)
+    member.is_active = (amount >= 100000)  # update status berdasarkan belanja
     if apply_to_balance:
         member.total_spent += amount
         st.session_state.total_cash_in += amount
@@ -213,12 +214,12 @@ def get_member_tree_cuan(root_id, members, search_id=None):
     if root_id not in members:
         return ""
     lines = ['digraph G {', 
-             '    rankdir=TB;', 
-             '    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial", fontsize=10, width=1.2, height=0.6];',
-             '    splines=ortho;',
-             '    nodesep=0.5;',
-             '    ranksep=0.5;',
-             '    margin=0;']
+             '    rankdir=LR;',   # Left to Right agar lebih lebar
+             '    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial", fontsize=14, width=1.8, height=0.8];',
+             '    splines=polyline;',
+             '    nodesep=0.8;',
+             '    ranksep=0.8;',
+             '    margin=0.2;']
     queue = deque([root_id])
     while queue:
         nid = queue.popleft()
@@ -248,12 +249,12 @@ def get_member_tree_rich(root_id, members, search_id=None):
     if not descendants:
         return ""
     lines = ['digraph G {', 
-             '    rankdir=TB;', 
-             '    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial", fontsize=10, width=1.2, height=0.6];',
-             '    splines=ortho;',
-             '    nodesep=0.5;',
-             '    ranksep=0.5;',
-             '    margin=0;']
+             '    rankdir=TB;',   # Top to Bottom untuk sponsor tree
+             '    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial", fontsize=14, width=1.8, height=0.8];',
+             '    splines=polyline;',
+             '    nodesep=0.8;',
+             '    ranksep=0.8;',
+             '    margin=0.2;']
     for nid in descendants:
         node = members[nid]
         if search_id == nid:
@@ -289,11 +290,7 @@ def create_sample_network():
             st.success(f"{name} (ID:{new.id}) berhasil.")
         else:
             st.error(f"Gagal: {info}")
-    # Set beberapa member aktif
-    for mid in [1,2,3,5]:
-        if mid in members:
-            members[mid].is_active = True
-    st.info("Sample jaringan 10 member selesai. Member 1,2,3,5 aktif.")
+    st.info("Sample jaringan 10 member selesai. Semua member aktif secara default.")
 
 def reset_app():
     for key in list(st.session_state.keys()):
