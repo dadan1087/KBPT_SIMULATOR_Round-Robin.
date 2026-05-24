@@ -12,7 +12,7 @@ class Member:
         self.parent_id = parent_id            # untuk Auto Cuan (placement)
         self.left_child_id = None
         self.right_child_id = None
-        self.is_active = is_active
+        self.is_active = is_active            # status Auto Cuan bulan ini
         self.balance_cuan = 0
         self.balance_rich = 0
         self.total_spent = 0
@@ -29,11 +29,13 @@ def init_session():
         st.session_state.total_bonus_rich = 0
         st.session_state.total_sponsor_bonus = 0
         st.session_state.transactions = []
+        # Antrian untuk spillover round‑robin (node yang masih punya slot kosong)
+        st.session_state.placement_queue = deque([1])
         st.session_state.selected_sponsor_id = 1
         st.session_state.reg_name = ""
-        # Konfigurasi komisi default
-        st.session_state.cuan_percent = [0, 0.01, 0.01, 0.05, 0.03, 0.03, 0.02, 0.03, 0.07]
-        st.session_state.rich_percent = [0, 0.05, 0.05, 0.04, 0.04, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01]
+        # Konfigurasi komisi default (dapat diubah via sidebar)
+        st.session_state.cuan_percent = [0, 0.01, 0.01, 0.05, 0.03, 0.03, 0.02, 0.03, 0.07]  # level 1..8
+        st.session_state.rich_percent = [0, 0.05, 0.05, 0.04, 0.04, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01]  # level 1..10
         st.session_state.cuan_max_level = 8
         st.session_state.rich_max_level = 10
         st.session_state.sponsor_bonus_percent = 0.20
@@ -41,23 +43,34 @@ def init_session():
 
 def find_placement_cuan():
     """
-    BFS level-order dengan prioritas kanan.
-    Kembalikan (parent_id, is_left) di mana is_left=False untuk kanan, True untuk kiri.
+    Spillover round-robin dimulai dari kanan.
+    Menggunakan antrian global yang berisi node yang masih memiliki slot kosong.
+    Setiap node diisi slot kanan dulu, lalu kiri. Setelah mengisi satu slot,
+    node dikembalikan ke antrian jika masih punya slot lain.
     """
     members = st.session_state.members
-    queue = deque([1])
-    while queue:
-        node_id = queue.popleft()
-        node = members[node_id]
-        # Prioritaskan slot kanan
-        if node.right_child_id is None:
-            return node_id, False   # False = kanan
+    queue = st.session_state.placement_queue
+    if not queue:
+        # fallback: isi antrian dengan semua node yang punya slot
+        for node in members.values():
+            if node.left_child_id is None or node.right_child_id is None:
+                queue.append(node.id)
+    node_id = queue.popleft()
+    node = members[node_id]
+    # Prioritas kanan
+    if node.right_child_id is None:
+        is_left = False
+        # Jika setelah diisi kanan, kiri masih kosong, node masih punya slot
         if node.left_child_id is None:
-            return node_id, True    # True = kiri
-        # Jika kedua anak penuh, masukkan ke queue dengan urutan kanan dulu
-        queue.append(node.right_child_id)
-        queue.append(node.left_child_id)
-    return None, None
+            queue.append(node_id)
+        return node_id, is_left
+    elif node.left_child_id is None:
+        is_left = True
+        # Jika kanan sudah terisi (karena dicek lebih dulu), maka setelah mengisi kiri node menjadi penuh
+        return node_id, is_left
+    else:
+        # Node seharusnya tidak ada di antrian karena sudah penuh
+        return find_placement_cuan()
 
 def register_member(sponsor_id, name):
     members = st.session_state.members
@@ -81,6 +94,9 @@ def register_member(sponsor_id, name):
         parent.right_child_id = new_id
     else:
         parent.left_child_id = new_id
+
+    # Node baru memiliki dua slot kosong, tambahkan ke antrian
+    st.session_state.placement_queue.append(new_id)
 
     posisi = "kanan" if not is_left else "kiri"
     info = (f"✅ Auto Cuan: anak {posisi} dari {parent.name} (ID:{parent.id})\n"
@@ -147,7 +163,7 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
                     st.session_state.total_bonus_cuan += komisi
                 bonus_cuan += komisi
                 breakdown_cuan.append((anc_id, anc.name, f"Matrix Level {lvl} ({percent*100:.0f}%)", komisi))
-        # Node INACTIVE -> breakage, tetapi ancestor di atasnya tetap diproses (lanjut)
+        # Node INACTIVE -> komisi hangus, tetapi ancestor di atasnya tetap diproses
 
     sponsor_bonus_total = 0
     for anc_id, _, _, komisi in breakdown_cuan:
