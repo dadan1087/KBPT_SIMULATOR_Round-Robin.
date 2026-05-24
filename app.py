@@ -18,54 +18,26 @@ class Member:
         self.total_spent = 0
         self.total_commission_received = 0
 
-# ---------------------------- Algoritma Spillover Round-Robin (BENAR) ----------------------------
-# Prinsip:
-# 1. Lakukan BFS dari root, kumpulkan semua node yang MASIH PUNYA SLOT KOSONG (kanan atau kiri)
-#    dengan urutan: node yang memiliki slot kanan kosong lebih diprioritaskan? Tidak, kita urutkan
-#    sesuai level-order dengan prioritas kanan terlebih dahulu dalam antrian BFS.
-# 2. Kemudian pilih node berikutnya secara round-robin dari daftar tersebut (bergantian).
-# 3. Setelah memilih node, isi slot kanan jika kosong, jika tidak isi kiri.
-# 4. Simpan last_placement_node untuk round-robin.
-
+# ---------------------------- Algoritma Placement BFS (Prioritas Kanan) ----------------------------
 def find_placement_cuan():
-    """Mengembalikan (parent_id, is_left) dengan is_left=True untuk kiri, False untuk kanan"""
+    """
+    Mencari node pertama dalam BFS (dengan prioritas kanan) yang memiliki slot kosong.
+    Mengembalikan (parent_id, is_left) dengan is_left=False untuk kanan, True untuk kiri.
+    """
     members = st.session_state.members
-    
-    # BFS untuk mengumpulkan node yang masih punya slot (kanan kosong atau kiri kosong)
-    # Urutan BFS: masukkan anak kanan dulu baru kiri agar prioritas kanan.
-    nodes_with_slots = []
     queue = deque([1])  # mulai dari root
     while queue:
         node_id = queue.popleft()
         node = members[node_id]
-        # Cek apakah node masih punya slot kosong
-        if node.right_child_id is None or node.left_child_id is None:
-            nodes_with_slots.append(node_id)
-        # Masukkan anak dengan prioritas kanan dulu
-        if node.right_child_id:
-            queue.append(node.right_child_id)
-        if node.left_child_id:
-            queue.append(node.left_child_id)
-    
-    if not nodes_with_slots:
-        return None, None
-    
-    # Round-robin: ambil node setelah last_placed
-    last = st.session_state.last_placement_node
-    try:
-        idx = nodes_with_slots.index(last)
-        next_idx = (idx + 1) % len(nodes_with_slots)
-    except ValueError:
-        next_idx = 0
-    target_id = nodes_with_slots[next_idx]
-    st.session_state.last_placement_node = target_id
-    
-    node = members[target_id]
-    # Prioritaskan kanan
-    if node.right_child_id is None:
-        return target_id, False   # False = kanan
-    else:
-        return target_id, True    # True = kiri
+        # Prioritaskan slot kanan
+        if node.right_child_id is None:
+            return node_id, False
+        if node.left_child_id is None:
+            return node_id, True
+        # Jika node penuh, masukkan anak ke queue dengan prioritas kanan dulu
+        queue.append(node.right_child_id)
+        queue.append(node.left_child_id)
+    return None, None
 
 def register_member(sponsor_id, name):
     members = st.session_state.members
@@ -81,11 +53,10 @@ def register_member(sponsor_id, name):
     if parent_id is None:
         return None, "Tidak ada slot kosong di binary tree."
     
-    # Member baru langsung aktif (sesuai permintaan)
+    # Member baru langsung aktif
     new_member = Member(new_id, name, sponsor_id, parent_id, is_active=True)
     members[new_id] = new_member
     parent = members[parent_id]
-    
     if not is_left:
         parent.right_child_id = new_id
     else:
@@ -157,7 +128,7 @@ def process_transaction_cuan(member_id, amount, apply_to_balance=False):
                     st.session_state.total_bonus_cuan += komisi
                 bonus_cuan += komisi
                 breakdown_cuan.append((anc_id, anc.name, f"Matrix Level {lvl} ({percent*100:.0f}%)", komisi))
-        # Node inactive -> komisi hangus, tetapi ancestor di atas tetap dapat (lanjut)
+        # Node inactive -> komisi hangus, ancestor di atas tetap dapat (lanjut)
 
     sponsor_bonus_total = 0
     for anc_id, _, _, komisi in breakdown_cuan:
@@ -275,7 +246,6 @@ def get_member_tree_rich(root_id, members, search_id=None):
     return "\n".join(lines)
 
 def get_tree_text(root_id, members, level=0):
-    """Tampilan teks tree untuk debugging"""
     if root_id not in members:
         return []
     node = members[root_id]
@@ -322,7 +292,6 @@ def reset_app():
     st.session_state.total_bonus_rich = 0
     st.session_state.total_sponsor_bonus = 0
     st.session_state.transactions = []
-    st.session_state.last_placement_node = 1
     st.session_state.selected_sponsor_id = 1
     st.session_state.reg_name = ""
     # Konfigurasi komisi default
@@ -382,7 +351,7 @@ def main():
 
     # Inisialisasi session state jika belum ada
     if 'members' not in st.session_state:
-        reset_app()  # panggil reset untuk inisialisasi lengkap
+        reset_app()
 
     with st.sidebar:
         st.header("🛠️ Manajemen")
